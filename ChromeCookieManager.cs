@@ -13,12 +13,9 @@ public class ChromeCookieManager
 
     public ChromeCookieManager()
     {
-        path = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "Google/Chrome/Profile 1/Cookies"
-        );
+        path = GetCookiesDatabasePath();
 
-        if (!File.Exists(path))
+        if (path is null)
         {
             throw new Exception("Chrome cookies database not found.");
         }
@@ -55,6 +52,21 @@ public class ChromeCookieManager
 
             yield return cookie;
         }
+    }
+
+    private static string GetCookiesDatabasePath()
+    {
+        var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var chromePath = Path.Combine(appDataPath, "Google/Chrome");
+
+        if (!Directory.Exists(chromePath))
+        {
+            throw new Exception("Chrome is not installed on this machine.");
+        }
+
+        return Directory.GetDirectories(chromePath, "Profile *")
+            .SelectMany(profile => Directory.GetFiles(profile, "Cookies"))
+            .MaxBy(File.GetLastWriteTimeUtc);
     }
 
     private static string GetChromeSafeStoragePassword()
