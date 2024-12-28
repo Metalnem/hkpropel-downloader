@@ -1,5 +1,4 @@
 ﻿using System.IO.Compression;
-using System.Net;
 using System.Text;
 using System.Xml.Linq;
 
@@ -21,7 +20,10 @@ public class Program
         }
 
         var cookieManager = new ChromeCookieManager();
-        var cookies = cookieManager.GetCookiesMac();
+
+        var cookies = cookieManager.GetCookiesMac()
+            .Where(cookie => cookie.Domain.EndsWith(".humankinetics.com"))
+            .ToList();
 
         var authenticationCookie = cookies.FirstOrDefault(cookie =>
         {
@@ -34,34 +36,38 @@ public class Program
             return 1;
         }
 
-        var cookie = string.Join("; ", cookies
-            .Where(cookie => cookie.Domain.EndsWith(".humankinetics.com"))
-            .Select(cookie => $"{cookie.Name}={cookie.Value}"));
+        using var apiClient = new ApiClient(cookies);
 
-        using var metadataClient = new MetadataClient(cookie);
-
-        var bookInfo = await metadataClient.GetBookInfo(args[0]);
-        var keyEncryptionKey = await metadataClient.GetKeyEncryptionKey();
+        var bookInfo = await apiClient.GetBookInfo(args[0]);
+        var keyEncryptionKey = await apiClient.GetKeyEncryptionKey();
         var contentEncryptionKey = Crypto.DecryptKey(bookInfo.Key, keyEncryptionKey);
 
-        using var handler = new HttpClientHandler { UseCookies = false };
-        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri(bookInfo.Url) };
-        httpClient.DefaultRequestHeaders.Add("Cookie", cookie);
+        var packageDocumentBytes = await apiClient.GetResource(bookInfo, PackageName);
+        var packageDocument = Encoding.UTF8.GetString(packageDocumentBytes);
 
-        using var response = await httpClient.GetAsync(PackageName);
-        response.EnsureSuccessStatusCode();
-
-        var package = await response.Content.ReadAsStringAsync();
         var outputDir = Path.GetRandomFileName();
-        await CreateEpubMetadata(outputDir, package);
+        await CreateEpubMetadata(outputDir, packageDocument);
 
-        using var reader = new StringReader(package);
+        using var reader = new StringReader(packageDocument);
         var document = await XDocument.LoadAsync(reader, LoadOptions.None, CancellationToken.None);
         var resources = GetAllResources(document);
 
-        await Parallel.ForEachAsync(resources, async (resource, _) =>
+        await Parallel.ForEachAsync(resources, async (resource, cancellationToken) =>
         {
-            await DownloadResource(httpClient, outputDir, resource, contentEncryptionKey);
+            var data = await apiClient.GetResource(bookInfo, resource);
+
+            if (resource == "nav.xhtml")
+            {
+                data = Crypto.DecryptContent(
+                    Encoding.UTF8.GetString(data),
+                    Encoding.UTF8.GetString(contentEncryptionKey)
+                );
+            }
+
+            var path = Path.Combine(outputDir, Oebps, resource);
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+
+            await File.WriteAllBytesAsync(path, data, cancellationToken);
         });
 
         string bookName = GetBookName(document);
@@ -98,31 +104,6 @@ public class Program
         }
 
         return references;
-    }
-
-    private static async Task DownloadResource(
-        HttpClient httpClient,
-        string outputDir,
-        string resource,
-        byte[] contentEncryptionKey)
-    {
-        using var response = await httpClient.GetAsync(resource);
-        response.EnsureSuccessStatusCode();
-
-        var path = Path.Combine(outputDir, Oebps, resource);
-        Directory.CreateDirectory(Path.GetDirectoryName(path));
-
-        var data = await response.Content.ReadAsByteArrayAsync();
-
-        if (resource == "nav.xhtml")
-        {
-            data = Crypto.DecryptContent(
-                Encoding.UTF8.GetString(data),
-                Encoding.UTF8.GetString(contentEncryptionKey)
-            );
-        }
-
-        await File.WriteAllBytesAsync(path, data);
     }
 
     private static string GetBookName(XDocument document)

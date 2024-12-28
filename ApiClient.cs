@@ -1,18 +1,23 @@
+using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace Hkpropel;
 
-public class MetadataClient : IDisposable
+public class ApiClient : IDisposable
 {
     private readonly HttpClientHandler handler;
     private readonly HttpClient client;
 
-    public MetadataClient(string cookie)
+    public ApiClient(IEnumerable<Cookie> cookies)
     {
-        handler = new HttpClientHandler { UseCookies = false };
+        handler = new HttpClientHandler { CookieContainer = new CookieContainer() };
         client = new HttpClient(handler) { BaseAddress = new Uri("https://hkpropel.humankinetics.com/") };
-        client.DefaultRequestHeaders.Add("Cookie", cookie);
+
+        foreach (var cookie in cookies)
+        {
+            handler.CookieContainer.Add(cookie);
+        }
     }
 
     public async Task<BookInfo> GetBookInfo(string id)
@@ -26,7 +31,7 @@ public class MetadataClient : IDisposable
         var epubContentPath = GetMagicSettingsVariable(content, "epubContentPath");
         var contentUpdated = GetMagicSettingsVariable(content, "contentUpdated");
 
-        return new BookInfo($"{epubContentPath}/{contentUpdated}/OPS/", passKey);
+        return new BookInfo($"{epubContentPath}/{contentUpdated}/OPS", passKey);
     }
 
     public async Task<string> GetKeyEncryptionKey()
@@ -38,6 +43,14 @@ public class MetadataClient : IDisposable
         using var json = JsonDocument.Parse(content);
 
         return json.RootElement.GetProperty("object").GetProperty("dummyText").GetString();
+    }
+
+    public async Task<byte[]> GetResource(BookInfo bookInfo, string resource)
+    {
+        using var response = await client.GetAsync($"{bookInfo.Url}/{resource}");
+        response.EnsureSuccessStatusCode();
+
+        return await response.Content.ReadAsByteArrayAsync();
     }
 
     private static string GetMagicSettingsVariable(string content, string variable)
