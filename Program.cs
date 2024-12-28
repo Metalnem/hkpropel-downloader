@@ -1,4 +1,5 @@
 ﻿using System.IO.Compression;
+using System.Net;
 using System.Text;
 using System.Xml.Linq;
 
@@ -13,19 +14,29 @@ public class Program
 
     public static async Task<int> Main(string[] args)
     {
-        var cookie = Environment.GetEnvironmentVariable("HKPROPEL_COOKIE");
-
-        if (cookie is null)
-        {
-            Console.Error.WriteLine("HKPROPEL_COOKIE is missing.");
-            return 1;
-        }
-
         if (args.Length == 0)
         {
             Console.Error.WriteLine("Book ID command line parameter is missing.");
             return 1;
         }
+
+        var cookieManager = new ChromeCookieManager();
+        var cookies = cookieManager.GetCookiesMac();
+
+        var authenticationCookie = cookies.FirstOrDefault(cookie =>
+        {
+            return cookie.Domain == ".humankinetics.com" && cookie.Name == "jwt_token";
+        });
+
+        if (authenticationCookie is null)
+        {
+            Console.Error.WriteLine("HK Propel authentication cookie was not found in Chrome.");
+            return 1;
+        }
+
+        var cookie = string.Join("; ", cookies
+            .Where(cookie => cookie.Domain.EndsWith(".humankinetics.com"))
+            .Select(cookie => $"{cookie.Name}={cookie.Value}"));
 
         using var metadataClient = new MetadataClient(cookie);
 
