@@ -13,17 +13,28 @@ public class Program
 
     public static async Task<int> Main(string[] args)
     {
-        var baseAddress = Environment.GetEnvironmentVariable("HKPROPEL_URL");
         var cookie = Environment.GetEnvironmentVariable("HKPROPEL_COOKIE");
 
-        if (baseAddress is null || cookie is null)
+        if (cookie is null)
         {
-            Console.Error.WriteLine("HKPROPEL_URL or HKPROPEL_COOKIE are missing.");
+            Console.Error.WriteLine("HKPROPEL_COOKIE is missing.");
             return 1;
         }
 
+        if (args.Length == 0)
+        {
+            Console.Error.WriteLine("Book ID command line parameter is missing.");
+            return 1;
+        }
+
+        using var metadataClient = new MetadataClient(cookie);
+
+        var bookInfo = await metadataClient.GetBookInfo(args[0]);
+        var keyEncryptionKey = await metadataClient.GetKeyEncryptionKey();
+        var contentEncryptionKey = Crypto.DecryptKey(bookInfo.Key, keyEncryptionKey);
+
         using var handler = new HttpClientHandler { UseCookies = false };
-        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri(baseAddress) };
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri(bookInfo.Url) };
         httpClient.DefaultRequestHeaders.Add("Cookie", cookie);
 
         using var response = await httpClient.GetAsync(PackageName);
@@ -39,7 +50,7 @@ public class Program
 
         await Parallel.ForEachAsync(resources, async (resource, _) =>
         {
-            await DownloadResource(httpClient, outputDir, resource);
+            await DownloadResource(httpClient, outputDir, resource, contentEncryptionKey);
         });
 
         string bookName = GetBookName(document);
@@ -78,7 +89,11 @@ public class Program
         return references;
     }
 
-    private static async Task DownloadResource(HttpClient httpClient, string outputDir, string resource)
+    private static async Task DownloadResource(
+        HttpClient httpClient,
+        string outputDir,
+        string resource,
+        byte[] contentEncryptionKey)
     {
         using var response = await httpClient.GetAsync(resource);
         response.EnsureSuccessStatusCode();
@@ -87,6 +102,15 @@ public class Program
         Directory.CreateDirectory(Path.GetDirectoryName(path));
 
         var data = await response.Content.ReadAsByteArrayAsync();
+
+        if (resource == "nav.xhtml")
+        {
+            data = Crypto.DecryptContent(
+                Encoding.UTF8.GetString(data),
+                Encoding.UTF8.GetString(contentEncryptionKey)
+            );
+        }
+
         await File.WriteAllBytesAsync(path, data);
     }
 
