@@ -33,14 +33,9 @@ public class Program
             .Where(cookie => cookie.Domain.EndsWith(".humankinetics.com"))
             .ToList();
 
-        var authenticationCookie = cookies.FirstOrDefault(cookie =>
+        if (!cookies.Any(cookie => cookie.Name == "jwt_token"))
         {
-            return cookie.Domain == ".humankinetics.com" && cookie.Name == "jwt_token";
-        });
-
-        if (authenticationCookie is null)
-        {
-            Console.Error.WriteLine("HK Propel authentication cookie was not found in Chrome.");
+            Console.Error.WriteLine("HK Propel authentication cookie was not found.");
             return 1;
         }
 
