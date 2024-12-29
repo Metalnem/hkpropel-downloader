@@ -1,5 +1,7 @@
-﻿using System.IO.Compression;
+﻿using System.CommandLine;
+using System.IO.Compression;
 using System.Text;
+using System.Text.Json;
 using System.Xml.Linq;
 
 namespace Hkpropel;
@@ -13,15 +15,21 @@ public class Program
 
     public static async Task<int> Main(string[] args)
     {
-        if (args.Length == 0)
-        {
-            Console.Error.WriteLine("Book ID command line parameter is missing.");
-            return 1;
-        }
+        var bookId = new Option<string>("--id", "HK Propel book ID.") { IsRequired = true };
+        var cookiesPath = new Option<string>("--cookies", "Path to exported Chrome cookies.") { IsRequired = true };
+        var command = new RootCommand("Download HK Propel books in EPUB format.") { bookId, cookiesPath };
 
-        var cookieManager = new ChromeCookieManager();
+        command.SetHandler(Download, bookId, cookiesPath);
+        return await command.InvokeAsync(args);
+    }
 
-        var cookies = cookieManager.GetCookiesMac()
+    private static async Task<int> Download(string bookId, string cookiesPath)
+    {
+        var json = File.ReadAllText(cookiesPath);
+        var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+
+        var cookies = JsonSerializer.Deserialize<CookieJson[]>(json, options)
+            .Select(cookie => cookie.ToCookie())
             .Where(cookie => cookie.Domain.EndsWith(".humankinetics.com"))
             .ToList();
 
@@ -38,7 +46,7 @@ public class Program
 
         using var apiClient = new ApiClient(cookies);
 
-        var bookInfo = await apiClient.GetBookInfo(args[0]);
+        var bookInfo = await apiClient.GetBookInfo(bookId);
         var keyEncryptionKey = await apiClient.GetKeyEncryptionKey();
         var contentEncryptionKey = Crypto.DecryptKey(bookInfo.Key, keyEncryptionKey);
 
