@@ -13,7 +13,7 @@ Download HK Propel (Human Kinetics) books in EPUB format. Read my blog post to l
 1) Open your HK Propel book in Chrome.
 2) Extract the book ID from the URL.
 3) Export HK Propel cookies in JSON format using `Get cookies.txt LOCALLY` extension.
-4) Run `dotnet run --id <book_id> --cookies <cookies_path>`.
+4) Run the following command in terminal: `dotnet run --id <book_id> --cookies <cookies_path>`.
 
 ```
 $ dotnet run
