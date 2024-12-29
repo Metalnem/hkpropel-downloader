@@ -25,7 +25,7 @@ public class Program
 
     private static async Task<int> Download(string bookId, string cookiesPath)
     {
-        var json = File.ReadAllText(cookiesPath);
+        var json = await File.ReadAllTextAsync(cookiesPath);
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 
         var cookies = JsonSerializer.Deserialize<CookieJson[]>(json, options)
